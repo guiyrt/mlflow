@@ -62,11 +62,29 @@ def create_openai_llmchain():
     return LLMChain(llm=llm, prompt=prompt)
 
 
+def create_openai_llmagent():
+    from langchain.agents import load_tools
+    from langchain.agents import initialize_agent
+    from langchain.agents import AgentType
+    from langchain.llms import OpenAI
+
+    # First, let's load the language model we're going to use to control the agent.
+    llm = OpenAI(temperature=0)
+
+    # Next, let's load some tools to use. Note that the `llm-math` tool uses an LLM, so we need to pass that in.
+    tools = load_tools(["serpapi", "llm-math"], llm=llm)
+
+    # Finally, let's initialize an agent with the tools, the language model, and the type of agent we want to use.
+    return initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
+
+
 def create_model(llm_type, model_path=None):
     if llm_type == "openai":
         return create_openai_llmchain()
     if llm_type == "huggingfacehub":
         return create_huggingface_model(model_path)
+    if llm_type == "openaiagent":
+        return create_openai_llmagent()
     if llm_type == "fake":
         return FakeLLM()
     raise NotImplementedError("This model is not supported yet.")
@@ -195,6 +213,22 @@ def test_langchain_log_huggingface_hub_model_metadata(model_path):
     assert type(loaded_model.llm) == langchain.llms.huggingface_pipeline.HuggingFacePipeline
     assert type(loaded_model.prompt) == langchain.prompts.PromptTemplate
     assert loaded_model.prompt.template == "What is a good name for a company that makes {product}?"
+
+
+def test_langchain_agent_model_predict():
+    with _mock_request(return_value=_mock_chat_completion_response()):
+        model = create_model("openaiagent")
+        with mlflow.start_run():
+            logged_model = mlflow.langchain.log_model(model, "langchain_model")
+        loaded_model = mlflow.pyfunc.load_model(logged_model.model_uri)
+        result = loaded_model.predict(
+            [
+                {
+                    "input": "What was the high temperature in SF yesterday in Fahrenheit? What is that number raised to the .023 power?"
+                }
+            ]
+        )
+        assert result == [TEST_CONTENT]
 
 
 def test_unsupported_chain_types():
